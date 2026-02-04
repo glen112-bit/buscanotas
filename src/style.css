@@ -1,0 +1,7 @@
+@import "tailwindcss";
+/* Puedes añadir esto en tu archivo index.css o en el mismo componente usando styled-components si lo usas */
+canvas {
+  width: 100%; /* Asegura que el canvas ocupe el ancho disponible */
+  height: 80px; /* Altura predeterminada del visualizador */
+  display: block; /* Para eliminar el margen inferior por defecto */
+}
