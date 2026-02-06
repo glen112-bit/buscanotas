@@ -79,97 +79,85 @@ export const Dashboard = () => {
 
 
   return (
-    <div className="min-h-screen bg-[#0d1117] text-slate-300 p-6 font-sans">
-      
-      {/* Barra Superior Estilo Aplicación */}
-      <header className="max-w-[1400px] mx-auto mb-8 bg-[#161b22] border border-white/5 p-5 rounded-[2rem] flex justify-between items-center shadow-2xl">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-cyan-500 rounded-2xl flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.3)]">
-            <span className="text-black font-black text-2xl italic">G</span>
-          </div>
-          <h1 className="text-2xl font-black text-white tracking-tighter uppercase">
-            BuscaNota <span className="text-cyan-400">Processor</span> <span className="font-light text-slate-500">PRO</span>
-          </h1>
-        </div>
-        <button className="px-6 py-2 bg-[#0d1117] border border-white/10 rounded-xl text-xs font-bold hover:bg-white hover:text-black transition-all uppercase tracking-widest">
-          Cerrar Sesión
-        </button>
-      </header>
-
-      <main className="max-w-[1400px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+  <div className="min-h-screen bg-[#0d1117] text-slate-300 p-4 md:p-8 font-sans flex justify-center">
+      <div className="w-full max-w-4xl space-y-6">
         
-        {/* PANEL LATERAL (Como en la imagen) */}
-        <aside className="lg:col-span-4 space-y-6">
-          <div className="bg-[#161b22] rounded-[2.5rem] border border-white/5 p-8 shadow-xl">
-            <div className="flex items-center gap-2 mb-8">
-              <div className="w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_8px_#22d3ee]" />
-              <h2 className="text-[10px] font-black tracking-widest text-slate-500 uppercase">Input Engine</h2>
+        {/* HEADER */}
+        <header className="bg-[#161b22] border border-white/5 p-6 rounded-[2rem] flex justify-between items-center shadow-2xl">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-cyan-500 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.3)]">
+              <span className="text-black font-black text-xl italic">G</span>
             </div>
-            <AudioInputProcessor 
-              onChordDetected={setCurrentData}
-              onPlayStateChange={setIsPlaying}
-            />
+            <h1 className="text-xl font-black text-white tracking-tighter uppercase">
+              BuscaNota <span className="text-cyan-400 font-light">PRO</span>
+            </h1>
           </div>
+          <button className="text-[10px] font-bold text-slate-500 hover:text-white uppercase tracking-widest transition-colors">
+            Cerrar Sesión
+          </button>
+        </header>
 
-          <div className="bg-[#161b22] rounded-[2.5rem] border border-white/5 p-8 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/5 blur-[50px] rounded-full" />
-            <p className="text-[10px] font-black text-slate-500 tracking-[0.2em] uppercase mb-4">Espectro Vocal</p>
-            <div className="flex items-center justify-between">
-              <span className="text-2xl font-bold text-white">{currentData.voice}</span>
-              <div className="w-16 h-8 bg-[#0d1117] rounded-full p-1.5 border border-white/5">
-                <div className={`h-full rounded-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-700 ${currentData.voice.includes('Alta') ? 'w-full shadow-[0_0_15px_rgba(168,85,247,0.4)]' : 'w-1/2'}`} />
-              </div>
-            </div>
+        {/* 1. MÓDULO DE ENTRADA (100% ancho) */}
+        <section className="bg-[#161b22] rounded-[2.5rem] border border-white/5 p-2 shadow-xl">
+          <div className="p-4 border-b border-white/5 flex items-center gap-2">
+            <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse" />
+            <h2 className="text-[10px] font-black tracking-widest text-slate-500 uppercase">Input Engine</h2>
           </div>
-        </aside>
+          <AudioInputProcessor 
+            onChordDetected={setCurrentData}
+            onPlayStateChange={setIsPlaying}
+          />
+        </section>
 
-        {/* MONITOR CENTRAL (Como en la imagen) */}
-        <section className="lg:col-span-8">
-          <div className="bg-[#161b22] rounded-[3rem] border border-white/5 p-12 h-full flex flex-col shadow-2xl relative">
+        {/* 2. MÓDULO DE MONITOR (Visualización Central) */}
+        <section className="bg-[#161b22] rounded-[3rem] border border-white/5 overflow-hidden shadow-2xl">
+          <div className="p-10 flex flex-col items-center text-center space-y-8">
             
-            {/* Status Header */}
-            <div className="flex justify-between items-center mb-16">
-              <div className="flex items-center gap-4 bg-[#0d1117] px-6 py-2 rounded-full border border-white/5">
-                <div className={`w-2 h-2 rounded-full ${isPlaying ? 'bg-cyan-400 animate-pulse' : 'bg-slate-700'}`} />
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  {isPlaying ? 'System Live' : 'Standby Mode'}
-                </span>
+            {/* Nota Detectada Gigante */}
+            <div className="relative group">
+              <div className="absolute -inset-10 bg-cyan-500/10 blur-[80px] opacity-50 group-hover:opacity-100 transition-opacity" />
+              <p className="text-[10px] font-black text-slate-500 tracking-[0.4em] uppercase mb-2">Frecuencia Dominante</p>
+              <div className="text-[12rem] font-black text-white leading-none tracking-tighter drop-shadow-2xl select-none">
+                {currentData.note.replace(/[0-9]/g, '') || "---"}
               </div>
-              <div className="flex gap-2">
-                <div className="w-2 h-2 rounded-full bg-slate-800" />
-                <div className="w-2 h-2 rounded-full bg-slate-800" />
+              <div className="inline-block bg-cyan-500/10 border border-cyan-500/20 px-4 py-1 rounded-full">
+                <span className="text-cyan-400 font-mono text-xs font-bold tracking-widest">{currentData.note}</span>
               </div>
             </div>
 
-            {/* Main Visualizer Area */}
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
-              <div className="relative">
-                <div className="absolute -inset-20 bg-cyan-500/5 blur-[100px] pointer-events-none" />
-                <p className="text-[10px] font-black text-slate-500 tracking-[0.3em] uppercase mb-4">Note Detected</p>
-                <div className="text-[12rem] font-black text-white leading-none tracking-tighter drop-shadow-2xl">
-                  {currentData.note.replace(/[0-9]/g, '') || "---"}
+            {/* Guitarra y Voz en paralelo dentro del monitor vertical */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full pt-8 border-t border-white/5">
+              <div className="flex flex-col items-center justify-center">
+                 <GuitarChord note={currentData.note} />
+              </div>
+              
+              <div className="flex flex-col justify-center space-y-6 bg-black/20 rounded-[2rem] p-8">
+                <div className="text-left">
+                  <p className="text-[10px] font-black text-slate-500 tracking-widest uppercase mb-2">Rango Vocal</p>
+                  <p className="text-3xl font-bold text-white italic">{currentData.voice}</p>
                 </div>
-                <div className="mt-4 inline-block bg-cyan-500/10 border border-cyan-500/20 px-4 py-1 rounded-lg">
-                  <span className="text-cyan-400 font-mono text-xs font-bold uppercase tracking-widest">Pitch: {currentData.note}</span>
+                <div className="w-full h-3 bg-[#0d1117] rounded-full overflow-hidden border border-white/5">
+                  <div 
+                    className={`h-full bg-gradient-to-r from-purple-500 to-cyan-500 transition-all duration-1000 shadow-[0_0_15px_rgba(6,182,212,0.5)]`}
+                    style={{ width: currentData.voice.includes('Alta') ? '100%' : currentData.voice.includes('Media') ? '60%' : '30%' }}
+                  />
                 </div>
               </div>
-
-              <GuitarChord note={currentData.note} />
             </div>
-
-            {/* Action Button (Estilo Neumórfico) */}
-            <button className="mt-12 group relative w-full overflow-hidden rounded-[2rem]">
-              <div className="absolute inset-0 bg-gradient-to-r from-cyan-600 to-cyan-400 opacity-90 transition-all group-hover:scale-105" />
-              <div className="relative py-8 flex items-center justify-center gap-4">
-                <span className="text-black font-black text-lg uppercase tracking-[0.3em]">
-                  Pegar Acorde [{currentData.note.replace(/[0-9]/g, '')}]
-                </span>
-              </div>
-            </button>
           </div>
         </section>
 
-      </main>
-    </div>
-  );
+        {/* 3. BOTÓN DE ACCIÓN (Pegar) */}
+        <footer className="pb-12">
+          <button className="group relative w-full overflow-hidden rounded-[2rem] active:scale-[0.98] transition-transform">
+            <div className="absolute inset-0 bg-gradient-to-r from-cyan-600 via-blue-500 to-cyan-400 opacity-90 group-hover:opacity-100 transition-all" />
+            <div className="relative py-8 flex items-center justify-center gap-4">
+              <span className="text-black font-black text-xl uppercase tracking-[0.3em] drop-shadow-sm">
+                Pegar Acorde {currentData.note.replace(/[0-9]/g, '')}
+              </span>
+            </div>
+          </button>
+        </footer>
+      </div>
+    </div>  );
 };
