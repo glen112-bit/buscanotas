@@ -39,13 +39,31 @@ const AppRoutes = () => {
       <Routes>
         <Route 
           path="/login" 
-          element={!isAuthenticated ? <LoginPage /> : <Navigate replace to="/dashboard" />} 
+          element={
+            !isAuthenticated ? 
+              <LoginPage /> 
+              : 
+              <Navigate replace to="/dashboard" 
+              />
+          } 
         />
         <Route 
           path="/register" 
-          element={!isAuthenticated ? <RegisterPage /> : <Navigate replace to="/dashboard" />} 
+          element={
+            !isAuthenticated 
+              ? 
+                <RegisterPage /> 
+                : 
+                <Navigate replace to="/dashboard" 
+                />
+          } 
         />
-        <Route path="/song/:id" element={<ProtectedRoute><SongDetailPage /></ProtectedRoute>} />
+        <Route path="/song/:id" 
+          element={
+            <ProtectedRoute>
+              <SongDetailPage />
+            </ProtectedRoute>} 
+        />
         <Route 
           path="/dashboard" 
           element={
@@ -54,10 +72,16 @@ const AppRoutes = () => {
         />
         <Route 
           path="*" 
-          element={<Navigate replace to={isAuthenticated ? "/dashboard" : "/login"} />} 
+          element={
+            <Navigate replace to={
+            isAuthenticated 
+              ? 
+                "/dashboard" 
+                : "/login"} 
+            />
+          } 
         />
       </Routes>
-        <SongDetailPage />
     </BrowserRouter>
   );
 };

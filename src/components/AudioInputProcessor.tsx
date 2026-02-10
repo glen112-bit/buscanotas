@@ -1,234 +1,274 @@
-
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { PitchDetector } from 'pitchy';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 
 interface AudioInputProcessorProps {
-  onChordDetected: (data: { note: string, voice: string }) => void;
+  onChordDetected: (data: { note: string; voice: string; measure?: number; beat?: number }) => void;
   onPlayStateChange: (isPlaying: boolean) => void;
 }
 
+const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
 export const AudioInputProcessor = ({ onChordDetected, onPlayStateChange }: AudioInputProcessorProps) => {
-  const [hasFile, setHasFile] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentTime, setCurrentTime] = useState("0:00");
-  const [duration, setDuration] = useState("0:00");
-  const [inputSource, setInputSource] = useState<'file' | 'mic'>('file');
-
-
+  const [sourceType, setSourceType] = useState<'mic' | 'file'>('file');
+  const [isActive, setIsActive] = useState(false);
+  const [currentNote, setCurrentNote] = useState("---");
+  const [bpm, setBpm] = useState(120);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [waveformPeaks, setWaveformPeaks] = useState<number[]>([]);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const requestRef = useRef<number>();
-  const streamRef = useRef<MediaStream | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  const lastDetectionTime = useRef(0);
+  const lastStableNote = useRef("---");
+  const voteStack = useRef<string[]>([]);
 
-  // Auxiliar: Frecuencia -> Nota Musical
-  const freqToNote = (frequency: number) => {
-    const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-    const halfStepsFromC0 = Math.round(12 * Math.log2(frequency / 16.35));
-    const index = halfStepsFromC0 % 12;
-    const octave = Math.floor(halfStepsFromC0 / 12);
-    return NOTES[index < 0 ? index + 12 : index] + octave;
-  };
+  // --- GENERADOR DE WAVEFORM REALISTA ---
+  const generateWaveform = async (file: File) => {
+    const arrayBuffer = await file.arrayBuffer();
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const rawData = audioBuffer.getChannelData(0); 
+    const samples = 120; 
+    const blockSize = Math.floor(rawData.length / samples);
+    const peaks = [];
 
-const startMicAnalysis = async () => {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const source = audioContextRef.current.createMediaStreamSource(stream);
-  source.connect(analyserRef.current);
-  analyze(); // Inicia el bucle de Pitchy
-};
-// Inicializador del contexto de audio (Singleton)
-  const initAudio = () => {
-    if (!audioContextRef.current) {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AudioCtx();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 2048;
-      audioContextRef.current = ctx;
-      analyserRef.current = analyser;
-      return { ctx, analyser };
-    }
-    return { ctx: audioContextRef.current, analyser: analyserRef.current! };
-  };
-
-
-  const analyze = useCallback(() => {
-    if (!analyserRef.current || !audioContextRef.current) return;
-    
-    // Si es archivo y está pausado, no analizar
-    if (inputSource === 'file' && audioRef.current?.paused) return;
-
-    const buffer = new Float32Array(analyserRef.current.fftSize);
-    analyserRef.current.getFloatTimeDomainData(buffer);
-
-    const detector = PitchDetector.forFloat32Array(analyserRef.current.fftSize);
-    const [pitch, clarity] = detector.findPitch(buffer, audioContextRef.current.sampleRate);
-
-    if (clarity > 0.85 && pitch > 50 && pitch < 2000) {
-      const note = freqToNote(pitch);
-      let voice = "Media";
-      if (pitch < 250) voice = "Baja (Bajo)";
-      else if (pitch > 500) voice = "Alta (Soprano)";
-      onChordDetected({ note, voice });
-    }
-
-    requestRef.current = requestAnimationFrame(analyze);
-  }, [onChordDetected, inputSource]);  // LA FUNCIÓN QUE FALTABA O TENÍA OTRO NOMBRE
-
-const toggleMic = async () => {
-    if (isPlaying && inputSource === 'mic') {
-      streamRef.current?.getTracks().forEach(track => track.stop());
-      setIsPlaying(false);
-      onPlayStateChange(false);
-      return;
-    }
-
-    const { ctx, analyser } = initAudio();
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const source = ctx.createMediaStreamSource(stream);
-      source.connect(analyser);
-      setInputSource('mic');
-      setIsPlaying(true);
-      onPlayStateChange(true);
-      analyze();
-    } catch (err) {
-      console.error("Error acceso mic:", err);
-    }
-  };
-
-const togglePlay = async () => {
-    const audio = audioRef.current;
-    if (!audio || !audio.src) return;
-
-    const { ctx, analyser } = initAudio();
-    
-    // Conectar el audio solo una vez
-    if (ctx.state === 'suspended') await ctx.resume();
-
-    try {
-      if (audio.paused) {
-        // Asegurar que la fuente esté conectada al analizador
-        const source = ctx.createMediaElementSource(audio);
-        source.connect(analyser);
-        analyser.connect(ctx.destination);
-        
-        await audio.play();
-        setInputSource('file');
-        setIsPlaying(true);
-        onPlayStateChange(true);
-        analyze();
-      } else {
-        audio.pause();
-        setIsPlaying(false);
-        onPlayStateChange(false);
+    for (let i = 0; i < samples; i++) {
+      let max = 0;
+      for (let j = 0; j < blockSize; j++) {
+        const val = Math.abs(rawData[i * blockSize + j]);
+        if (val > max) max = val;
       }
-    } catch (err) {
-      // Si ya estaba conectado, solo dar play
-      audio.play();
-      setIsPlaying(true);
-      onPlayStateChange(true);
-      analyze();
+      peaks.push(max);
     }
-  };// Función para formatear segundos a MM:SS
+    setWaveformPeaks(peaks);
+    audioCtx.close();
+  };
+
+  // --- LÓGICA DE CONTROL DE AUDIO ---
+  const toggleSensor = async () => {
+    if (isActive) {
+      setIsActive(false);
+      onPlayStateChange(false);
+      if (audioRef.current) audioRef.current.pause();
+    } else {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        analyserRef.current = audioContextRef.current.createAnalyser();
+        analyserRef.current.fftSize = 2048;
+        analyserRef.current.smoothingTimeConstant = 0.8;
+      }
+
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
+      if (sourceType === 'file' && audioRef.current?.src) {
+        try {
+          // Conectar solo una vez
+          const source = audioContextRef.current.createMediaElementSource(audioRef.current);
+          source.connect(analyserRef.current);
+          analyserRef.current.connect(audioContextRef.current.destination);
+        } catch (e) { /* Ya conectado */ }
+        audioRef.current.play();
+      }
+      setIsActive(true);
+      onPlayStateChange(true);
+    }
+  };
+
+  // --- MOTOR DE DETECCIÓN MUSICAL ---
+  const processAudio = useCallback(() => {
+    if (!analyserRef.current || !isActive) return;
+
+    const bufferLength = analyserRef.current.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    analyserRef.current.getByteFrequencyData(dataArray);
+
+    let maxVal = 0;
+    let maxIndex = -1;
+
+    // Filtro de rango de guitarra (ignora sibilancias de voz)
+    const low = Math.floor(80 * bufferLength / (audioContextRef.current!.sampleRate / 2));
+    const high = Math.floor(1000 * bufferLength / (audioContextRef.current!.sampleRate / 2));
+
+    for (let i = low; i < high; i++) {
+      if (dataArray[i] > maxVal) {
+        maxVal = dataArray[i];
+        maxIndex = i;
+      }
+    }
+
+    const windowMs = (60 * 1000 / bpm) / 4; // Ajuste por BPM
+    const now = Date.now();
+
+    if (maxVal > 85) {
+      const freq = maxIndex * (audioContextRef.current!.sampleRate / 2) / bufferLength;
+      const midi = Math.round(12 * Math.log2(freq / 440) + 69);
+      const detectedNote = NOTES[midi % 12];
+      voteStack.current.push(detectedNote);
+
+      if (now - lastDetectionTime.current > windowMs) {
+        const counts = voteStack.current.reduce((a: any, b) => (a[b] = (a[b] || 0) + 1, a), {});
+        const winner = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+        const confidence = counts[winner] / voteStack.current.length;
+
+        if (confidence > 0.75 && winner !== lastStableNote.current) {
+          lastStableNote.current = winner;
+          setCurrentNote(winner);
+          onChordDetected({ note: winner, voice: "Estable" });
+        }
+        voteStack.current = [];
+        lastDetectionTime.current = now;
+      }
+    }
+
+    requestRef.current = requestAnimationFrame(processAudio);
+  }, [isActive, bpm, onChordDetected]);
+
+  // --- DIBUJO OSCILOSCOPIO ---
+  const drawOscilloscope = useCallback(() => {
+    if (!analyserRef.current || !isActive || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d')!;
+    const bufferLength = analyserRef.current.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+    analyserRef.current.getByteTimeDomainData(dataArray);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#22d3ee';
+    ctx.beginPath();
+
+    const sliceWidth = canvas.width / bufferLength;
+    let x = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      const v = dataArray[i] / 128.0;
+      const y = (v * canvas.height) / 2;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+      x += sliceWidth;
+    }
+    ctx.stroke();
+    requestAnimationFrame(drawOscilloscope);
+  }, [isActive]);
+
+  useEffect(() => {
+    if (isActive) {
+      requestRef.current = requestAnimationFrame(processAudio);
+      drawOscilloscope();
+    }
+    return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); };
+  }, [isActive, processAudio, drawOscilloscope]);
+
+  // --- EVENTOS DE AUDIO ---
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const upTime = () => { setCurrentTime(audio.currentTime); setDuration(audio.duration || 0); };
+    audio.addEventListener('timeupdate', upTime);
+    audio.addEventListener('loadedmetadata', upTime);
+    return () => { audio.removeEventListener('timeupdate', upTime); audio.removeEventListener('loadedmetadata', upTime); };
+  }, []);
+
   const formatTime = (time: number) => {
     const mins = Math.floor(time / 60);
     const secs = Math.floor(time % 60);
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Actualizar la barra de progreso mientras suena
-  const handleTimeUpdate = () => {
-    if (audioRef.current) {
-      const current = audioRef.current.currentTime;
-      const total = audioRef.current.duration;
-      setProgress((current / total) * 100);
-      setCurrentTime(formatTime(current));
-    }
-  };
-
-  const handleLoadedMetadata = () => {
-    if (audioRef.current) {
-      setDuration(formatTime(audioRef.current.duration));
-    }
-  };
-
-  // Función para saltar a un punto de la canción al hacer clic en la barra
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (audioRef.current) {
-      const seekTo = (Number(e.target.value) / 100) * audioRef.current.duration;
-      audioRef.current.currentTime = seekTo;
-      setProgress(Number(e.target.value));
-    }
-  };
   return (
-    <div className="p-6 bg-slate-900/80 border border-slate-700 rounded-2xl">
-      <div className="flex items-center gap-3 mb-4">
-        <div className={`h-2 w-2 rounded-full ${hasFile ? 'bg-cyan-400' : 'bg-slate-600'}`} />
-        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-          Sensor de Audio JS
-        </span>
+    <div className="bg-[#0b0e14] border border-white/10 rounded-[2.5rem] p-8 text-white shadow-2xl w-full max-w-xl mx-auto transition-all">
+      
+      {/* SWITCHER MIC/FILE */}
+      <div className="flex bg-black/40 p-1 rounded-2xl mb-8 border border-white/5">
+        {(['mic', 'file'] as const).map(mode => (
+          <button key={mode} onClick={() => { setIsActive(false); setSourceType(mode); }}
+            className={`flex-1 py-3 text-[11px] font-black rounded-xl transition-all tracking-widest ${sourceType === mode ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-slate-500 hover:text-white'}`}>
+            {mode.toUpperCase()}
+          </button>
+        ))}
       </div>
 
-      <input 
-        type="file" 
-        accept="audio/*" 
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file && audioRef.current) {
-            audioRef.current.src = URL.createObjectURL(file);
-            setHasFile(true);
-          }
-        }}
+      {/* MONITOR DE NOTA CON OSCILOSCOPIO */}
+      <div className="bg-black rounded-[2.5rem] py-10 border border-white/5 flex flex-col items-center justify-center mb-8 relative overflow-hidden group">
+        <canvas ref={canvasRef} width={400} height={150} className="absolute inset-0 w-full h-full opacity-40 pointer-events-none" />
+       
+        <div className={`relative z-10 text-[9px] uppercase tracking-[0.4em] mt-4 font-black transition-colors ${isActive ? 'text-cyan-400 animate-pulse' : 'text-slate-600'}`}>
+          {isActive ? 'Engine Active' : 'System Standby'}
+        </div>
+      </div>
 
-        className="block w-full text-xs text-slate-500 mb-6 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-slate-800 file:text-cyan-400 cursor-pointer"
-      />
- {/* BARRA DE NAVEGACIÓN DEL ARCHIVO (SEEKBAR) */}
-            {hasFile && (
-              <div className="space-y-2 animate-in fade-in slide-in-from-top-4 duration-500">
-                <div className="flex justify-between text-[10px] font-mono text-slate-500 tracking-widest px-1">
-                  <span>{currentTime}</span>
-                  <span>{duration}</span>
-                </div>
-                <div className="relative group">
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="100" 
-                    value={progress} 
-                    onChange={handleSeek}
-                    className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500 hover:accent-cyan-400 transition-all"
-                  />
-                  {/* Reflejo de luz bajo la barra */}
-                  <div 
-                    className="absolute top-0 left-0 h-1.5 bg-cyan-500/30 blur-md pointer-events-none transition-all"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </div>
-            )}     
-      <button 
-        onClick={togglePlay} // Ahora sí está definida aquí arriba
-        disabled={!hasFile}
-        className={`w-full py-4 rounded-xl font-black text-xs transition-all ${
-          isPlaying ? 'bg-red-500/20 text-red-500' : 'bg-cyan-500 text-black'
-        } disabled:opacity-20`}
-      >
-        {isPlaying ? 'DETENER SENSOR' : 'REPRODUCIR ARCHIVO'}
-      </button>
+      {/* WAVEFORM & SEEKER */}
+      {sourceType === 'file' && fileName && (
+        <div className="mb-8">
+          <div className="flex justify-between text-[11px] font-mono mb-3 px-2">
+            <span className="text-cyan-400 font-bold">{formatTime(currentTime)}</span>
+            <span className="text-slate-600">{formatTime(duration)}</span>
+          </div>
 
-      <audio ref={audioRef}
-        ref={audioRef} 
-        onTimeUpdate={handleTimeUpdate} // Actualiza progreso y tiempo actual
-        onLoadedMetadata={handleLoadedMetadata} // Carga la duración total
-        onEnded={() => {
-          setIsPlaying(false);
-          onPlayStateChange(false);
-          setProgress(0);
-        }}
-      />
+          <div className="relative h-24 w-full bg-black/60 rounded-2xl border border-white/5 overflow-hidden group">
+            <div className="absolute inset-0 flex items-center justify-between px-3 gap-[2px]">
+              {waveformPeaks.map((peak, i) => {
+                const progress = (currentTime / duration) * 100;
+                const currentBarPos = (i / waveformPeaks.length) * 100;
+                const isPlayed = currentBarPos <= progress;
+                
+                let color = 'rgba(255,255,255,0.1)';
+                if (isPlayed) {
+                  if (peak > 0.75) color = '#ef4444'; 
+                  else if (peak > 0.45) color = '#f59e0b';
+                  else color = '#22d3ee';
+                }
+
+                return (
+                  <div key={i} className="flex-1 rounded-full transition-all duration-300"
+                    style={{ height: `${Math.max(10, peak * 90)}%`, backgroundColor: color }} />
+                );
+              })}
+            </div>
+            <input type="range" min="0" max={duration || 0} step="0.01" value={currentTime}
+              onChange={(e) => { if (audioRef.current) audioRef.current.currentTime = parseFloat(e.target.value); }}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30" />
+            <div className="absolute top-0 bottom-0 w-[2px] bg-white z-20 pointer-events-none shadow-[0_0_15px_white]"
+              style={{ left: `${(currentTime / duration) * 100}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-6">
+        {/* CARGA DE ARCHIVO */}
+        {sourceType === 'file' && !isActive && (
+          <div className="relative">
+            <input type="file" id="file-upload" accept="audio/*" onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file && audioRef.current) {
+                audioRef.current.src = URL.createObjectURL(file);
+                setFileName(file.name);
+                generateWaveform(file);
+              }
+            }} className="hidden" />
+            <label htmlFor="file-upload" className="flex flex-col items-center py-6 border-2 border-dashed border-white/10 rounded-2xl cursor-pointer hover:bg-white/[0.02] hover:border-cyan-500/50 transition-all">
+              <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">
+                {fileName ? 'Cambiar Archivo' : 'Cargar Audio'}
+              </span>
+              {fileName && <span className="text-[9px] text-cyan-500 mt-2 italic px-4 text-center">{fileName}</span>}
+            </label>
+          </div>
+        )}
+
+       
+
+        <button onClick={toggleSensor} 
+          className={`w-full py-5 rounded-2xl font-black text-[11px] tracking-[0.2em] transition-all shadow-xl ${isActive ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 'bg-white text-black hover:scale-[1.02]'}`}>
+          {isActive ? 'TERMINAR SESIÓN' : 'INICIAR ANÁLISIS'}
+        </button>
+      </div>
+      <audio ref={audioRef} className="hidden" />
     </div>
   );
 };
