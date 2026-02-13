@@ -1,17 +1,31 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <link href="/src/style.css" rel="stylesheet">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
-    <script src="/essentia.js"></script>
-    
-    <title>mynotes</title>
+    <link href="/src/style.css" rel="stylesheet">
+
+
+    <title>MyNotes - IA Audio Pro</title>
   </head>
-  <body>
+  <body class="bg-[#0b0e14]">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+<script>
+  // Parche para compatibilidad de Magenta con el navegador
+  window.global = window;
+  window.process = {
+    env: { NODE_ENV: 'development' },
+    hrtime: (() => {
+      const startTime = performance.now();
+      return () => {
+        const now = performance.now() - startTime;
+        const seconds = Math.floor(now / 1000);
+        const nanoseconds = Math.floor((now % 1000) * 1000000);
+        return [seconds, nanoseconds];
+      };
+    })()
+  };
+</script>
   </body>
 </html>

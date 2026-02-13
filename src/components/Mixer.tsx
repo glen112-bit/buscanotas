@@ -1,86 +1,120 @@
 import React, { useState, useEffect } from 'react';
 
 interface MixerProps {
-  volumes: { guitar: number; bass: number; vocals: number };
-  onChange: (track: 'guitar' | 'bass' | 'vocals', value: number) => void;
-  colors: { guitar: string; bass: string; vocals: string };
+  stems: { [key: string]: string };
+  volumes: { [key: string]: number };
+  onChange: (track: string, value: number) => void;
+  colors: { [key: string]: string };
+  audioRefs: React.MutableRefObject<{ [key: string]: HTMLAudioElement | null }>;
 }
 
-export const Mixer = ({ volumes, onChange, colors }: MixerProps) => {
-  const [soloTrack, setSoloTrack] = useState<'guitar' | 'bass' | 'vocals' | null>(null);
+export const Mixer = ({ stems, volumes, onChange, colors, audioRefs }: MixerProps) => {
+  const [soloTrack, setSoloTrack] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
 
-  const handleSolo = (track: 'guitar' | 'bass' | 'vocals') => {
-    const newSolo = soloTrack === track ? null : track;
-    setSoloTrack(newSolo);
-    
-    // Si activamos solo, bajamos el volumen de los demás a 0 momentáneamente
-    // Si desactivamos, restauramos (esto se gestiona mejor en el padre, 
-    // pero aquí aplicamos la lógica visual)
+  // 1. Efecto para manejar el volumen y la lógica de Solo
+  useEffect(() => {
+    Object.keys(stems).forEach((track) => {
+      const audio = audioRefs.current[track];
+      if (audio) {
+        const isMutedBySolo = soloTrack !== null && soloTrack !== track;
+        // Aplicamos volumen 0 si hay otra pista en SOLO, o el volumen del slider
+        audio.volume = isMutedBySolo ? 0 : (volumes[track] ?? 0.8);
+      }
+    });
+  }, [volumes, soloTrack, stems, audioRefs]);
+
+  const togglePlay = async () => {
+    const audios = Object.values(audioRefs.current).filter(a => a !== null) as HTMLAudioElement[];
+    if (audios.length === 0) return;
+// Dentro de la función que inicia el Playback
+if (audioContext.state === 'suspended') {
+  await audioContext.resume();
+}
+    if (isPlaying) {
+      audios.forEach(a => a.pause());
+      setIsPlaying(false);
+    } else {
+      try {
+        // Sincronizar todos al mismo tiempo exacto
+        const commonTime = audios[0].currentTime;
+        const playPromises = audios.map(async (a) => {
+          a.currentTime = commonTime;
+          return a.play();
+        });
+
+        await Promise.all(playPromises);
+        setIsPlaying(true);
+      } catch (error) {
+        console.error("Error al reproducir stems:", error);
+      }
+    }
   };
 
-  const isMutedBySolo = (track: string) => soloTrack !== null && soloTrack !== track;
+  const handleSolo = (track: string) => {
+    setSoloTrack(prev => (prev === track ? null : track));
+  };
 
   return (
-    <div className="bg-[#0f1218] p-8 rounded-[2.5rem] border border-white/10 shadow-2xl">
-      <div className="flex justify-around items-end h-56 gap-4">
-        {(['guitar', 'bass', 'vocals'] as const).map((track) => {
-          const muted = isMutedBySolo(track);
-          
-          return (
-            <div 
-              key={track} 
-              className={`flex flex-col items-center gap-4 w-full transition-all duration-500 ${muted ? 'opacity-20 scale-95' : 'opacity-100'}`}
-            >
-              {/* BOTÓN SOLO */}
-              <button
-                onClick={() => handleSolo(track)}
-                className={`px-3 py-1 rounded-md text-[8px] font-black uppercase tracking-tighter transition-all border ${
-                  soloTrack === track 
-                    ? 'bg-yellow-500 border-yellow-400 text-black shadow-[0_0_15px_rgba(234,179,8,0.4)]' 
-                    : 'bg-black/40 border-white/10 text-slate-500 hover:border-white/30'
-                }`}
-              >
-                SOLO
-              </button>
+    <div className="bg-[#0b0e14] p-6 rounded-[2.5rem] border border-white/5 shadow-2xl">
+      {/* MOTORES DE AUDIO (Ocultos y fuera de los bucles visuales) */}
+      <div className="hidden">
+        {Object.entries(stems).map(([name, url]) => (
+          <div key={name}>
+            <audio 
+              ref={el => audioRefs.current[name] = el} 
+              src={url} 
+              loop 
+            />
+            {/* Controles de volumen aquí */}
+          </div>
+        ))}
+      </div>
 
-              {/* Fader Container */}
-              <div className="relative h-32 w-3 bg-slate-900 rounded-full border border-white/5 shadow-inner">
-                {/* Visual Fill */}
-                <div 
-                  className="absolute bottom-0 w-full rounded-full transition-all duration-200"
-                  style={{ 
-                    height: `${volumes[track] * 100}%`, 
-                    backgroundColor: colors[track],
-                    boxShadow: `0 0 20px ${colors[track]}44`
-                  }} 
-                />
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={volumes[track]}
-                  onChange={(e) => onChange(track, parseFloat(e.target.value))}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-              </div>
+      <div className="flex justify-center mb-10">
+        <button 
+          onClick={togglePlay}
+          className={`px-8 py-3 rounded-full font-black tracking-widest transition-all ${
+            isPlaying 
+              ? 'bg-red-500/20 text-red-500 border border-red-500/50' 
+              : 'bg-cyan-500 text-black shadow-[0_0_20px_rgba(6,182,212,0.4)]'
+          }`}
+        >
+          {isPlaying ? 'PAUSE SESSION' : 'START PLAYBACK'}
+        </button>
+      </div>
 
-              {/* Label & Icon */}
-              <div className="flex flex-col items-center">
-                <span 
-                  className="text-[10px] font-black tracking-widest uppercase mb-1 transition-colors" 
-                  style={{ color: muted ? '#475569' : colors[track] }}
-                >
-                  {track}
-                </span>
-                <span className="text-xl filter grayscale-[0.5]" style={{ opacity: muted ? 0.3 : 1 }}>
-                  {track === 'guitar' ? '🎸' : track === 'bass' ? '🎻' : '🎤'}
-                </span>
-              </div>
+      <div className="flex justify-between items-end gap-2 h-72">
+        {
+          Object.entries(stems).map(([name, url]) => (
+            <div key={name}>
+              <audio 
+                ref={(el) => {
+                  if (el) {
+                    audioRefs.current[name] = el;
+                    // Forzamos la carga si el src cambió
+                    if (el.src !== url) {
+                      el.src = url as string;
+                      el.load(); 
+                    }
+                  }
+                }} 
+                loop
+                preload="auto"
+              />
+              {/* Controles de volumen... */}
             </div>
-          );
-        })}
+          ))        }
       </div>
     </div>
   );
+};
+
+const getEmoji = (track: string) => {
+  const t = track.toLowerCase();
+  if (t.includes('vocal')) return '🎤';
+  if (t.includes('bass')) return '🎸';
+  if (t.includes('drum')) return '🥁';
+  if (t.includes('guitar')) return '🎸';
+  return '🎼';
 };
