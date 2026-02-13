@@ -8,6 +8,12 @@ export const Dashboard = () => {
   const [currentData, setCurrentData] = useState({ note: "---", voice: "Esperando..." });
   const [isPlaying, setIsPlaying] = useState(false);
   const [chordType, setChordType] = useState(""); 
+  const [stems, setStems] = useState<any>(null);
+  const [volumes, setVolumes] = useState<any>({});
+
+  const handleMixerChange = (track: string, value: number) => {
+    setVolumes(prev => ({ ...prev, [track]: value }));
+  };
 
   const chordTypes = ["", "m", "7", "maj7", "9", "dim", "aug"];
 
@@ -38,7 +44,14 @@ export const Dashboard = () => {
   };
   const chordToRender = getChordData(currentData?.note, chordType);
   const displayNote = currentData?.note?.replace(/[0-9]/g, '') || "---";
-
+  // Cuando la API termine:
+  const onUploadSuccess = (data: any) => {
+    setStems(data.files); // Guardamos las URLs
+    // Inicializamos volúmenes al 80%
+    const initialVols = {};
+    Object.keys(data.files).forEach(k => initialVols[k] = 0.8);
+    setVolumes(initialVols);
+  };
   return (
     <div className="min-h-screen bg-[#0d1117] text-slate-300 p-4 md:p-8 font-sans flex justify-center">
       <div className="w-full max-w-4xl space-y-6">
@@ -86,45 +99,45 @@ export const Dashboard = () => {
               </div>
             </div>
 
-            {/* EL MÁSTIL HORIZONTAL */}
-            <div className="w-full bg-black/40 rounded-[2rem] border border-white/5 backdrop-blur-md">
-              {chordToRender ? (
+              {/* EL MÁSTIL HORIZONTAL */}
+              <div className="w-full bg-black/40 rounded-[2rem] border border-white/5 backdrop-blur-md">
+                {chordToRender ? (
                 <GuitarFretboard note={currentData.note} type={chordType} />
-              ) : (
-                <div className="h-64 flex items-center justify-center text-slate-600 italic tracking-widest text-xs uppercase">
-                  {isPlaying ? "Analyzing Spectrum..." : "Engine Offline"}
-                </div>
-              )}
-            </div>
+                ) : (
+              <div className="h-64 flex items-center justify-center text-slate-600 italic tracking-widest text-xs uppercase">
+            {isPlaying ? "Analyzing Spectrum..." : "Engine Offline"}
+              </div>
+            )}
+              </div>
 
-          </div>
-        </section>
-        {/* SELECTOR DE TIPO */}
-        <div className="flex flex-wrap gap-2 mb-6 justify-center">
-          {chordTypes.map((t) => (
-            <button
-              key={t}
-              onClick={() => setChordType(t)}
-              className={`px-6 py-3 rounded-full text-[10px] font-black transition-all border ${
-                chordType === t 
-                  ? 'bg-cyan-500 text-black border-cyan-400 shadow-lg' 
-                  : 'bg-white/5 text-slate-500 border-transparent hover:bg-white/10'
-              }`}
-            >
-              {t === "" ? "MAJOR" : t.toUpperCase()}
+              </div>
+              </section>
+                {/* SELECTOR DE TIPO */}
+                <div className="flex flex-wrap gap-2 mb-6 justify-center">
+                {chordTypes.map((t) => (
+              <button
+            key={t}
+            onClick={() => setChordType(t)}
+          className={`px-6 py-3 rounded-full text-[10px] font-black transition-all border ${
+        chordType === t 
+        ? 'bg-cyan-500 text-black border-cyan-400 shadow-lg' 
+          : 'bg-white/5 text-slate-500 border-transparent hover:bg-white/10'
+          }`}
+              >
+            {t === "" ? "MAJOR" : t.toUpperCase()}
             </button>
-          ))}
-        </div>
+                ))}
+                </div>
 
-        {/* BOTÓN GUARDAR */}
-        <footer className="pb-12">
-          <button className="group relative w-full overflow-hidden rounded-[2.5rem] py-8 active:scale-[0.98] transition-all bg-gradient-to-r from-cyan-600 to-blue-500">
-            <span className="relative z-10 text-black font-black text-xl uppercase tracking-[0.3em]">
-              Guardar {displayNote}{chordType}
-            </span>
-          </button>
-        </footer>
-      </div>
-    </div>  
-  );
-};
+                {/* BOTÓN GUARDAR */}
+                <footer className="pb-12">
+                  <button className="group relative w-full overflow-hidden rounded-[2.5rem] py-8 active:scale-[0.98] transition-all bg-gradient-to-r from-cyan-600 to-blue-500">
+                  <span className="relative z-10 text-black font-black text-xl uppercase tracking-[0.3em]">
+                  Guardar {displayNote}{chordType}
+                  </span>
+                  </button>
+                </footer>
+                </div>
+          </div>  
+                  );
+                    };
