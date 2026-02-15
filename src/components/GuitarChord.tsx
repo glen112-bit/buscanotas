@@ -9,7 +9,8 @@ interface GuitarChordProps {
 export const GuitarChord: React.FC<GuitarChordProps> = ({ note, type }) => {
   const rootNote = note.replace(/[0-9]/g, '');
   const chordName = rootNote + type;
-  
+  const AUDIO_OFFSET = -0.150; // Ajusta este valor (en segundos) hasta que encaje
+  const notePosition = (noteTime - (currentTime + AUDIO_OFFSET)) * SPEED_FACTOR;
   // ERROR CORREGIDO: Extraemos el objeto y luego sus propiedades
   const chordData = GUITAR_CHORDS[note] || GUITAR_CHORDS[rootNote];
   
