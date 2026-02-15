@@ -3,6 +3,7 @@ import { Mixer } from './Mixer'; // Asegúrate de que la ruta sea correcta
 
 // Configuración - Ajusta según tus constantes
 const API_KEY = 'L6A6IpxuJSVbM8MPwXWIbaF8YIDJsn';
+const API_BASE = "/api_mvsep";
 const PROXY_PREFIX = '/api_mvsep';
 
 const TRACK_THEME = {
@@ -54,8 +55,8 @@ export const AudioInputProcessor = ({ onPlayStateChange, currentNote, confidence
     setIsProcessing(false);
   };
 
-  // --- LÓGICA DE ESPERA (POLLING) ---
-  const waitForMVSepTask = async (hash: string) => {
+
+ const waitForMVSepTask = async (hash: string) => {
     const url = `${PROXY_PREFIX}/api/separation/get?hash=${hash}&api_token=${API_KEY}`;
     
     while (true) {
@@ -96,6 +97,58 @@ export const AudioInputProcessor = ({ onPlayStateChange, currentNote, confidence
       await new Promise(r => setTimeout(r, waitTime));
     }
   };
+  // --- LÓGICA DE ESPERA (POLLING) ---
+  // const waitForMVSepTask = async (hash: string) => {
+    // const url = `${PROXY_PREFIX}/api/separation/get?hash=${hash}&api_token=${API_KEY}`;
+    // sessionStorage.removeItem('pendingTaskHash');
+//
+    // while (true) {
+      // const response = await fetch(url);
+      // if (!response.ok) {
+        // await new Promise(r => setTimeout(r, 5000));
+        // continue;
+      // }
+//
+      // const res = await response.json();
+      // const info = res.data || res;
+      // const status = info.status || res.status;
+//
+      // Extraer datos de fila y progreso
+      // const order = info.current_order || (res.data && res.data.current_order) || 0;
+      // const progress = info.progress || 0;
+//
+      // console.log(`Estado: ${status} | Posición: ${order} | Progreso: ${progress}%`);
+      // if (data.status === 'done') {
+        // MVSep a veces usa 'files', otras 'download_urls' u 'output_files'
+        // const stemsData = data.files || data.download_urls || data.output_files;
+//
+        // console.log("Datos de archivos recibidos:", stemsData); // <--- MIRA ESTO EN CONSOLA
+//
+        // const localUrls = await downloadFiles(stemsData);
+        // setupAudioStems(localUrls);
+        // break;
+      // }
+      // if (status === 'done' && info.files) {
+        // sessionStorage.removeItem('pendingTaskHash');
+        // return await downloadFiles(info.files);
+      // }
+//
+      // if (status === 'error') throw new Error(info.error || "Error en IA");
+//
+      // Actualizar UI
+      // if (status === 'waiting' || status === 'queue') {
+        // setStatusMessage(`En fila: Lugar #${order} (Ten paciencia...)`);
+      // } else if (status === 'processing') {
+        // setStatusMessage(`IA Trabajando: ${progress}%`);
+      // } else {
+        // setStatusMessage("Sincronizando con el servidor...");
+      // }
+//
+      // Espera inteligente: 15 segundos en fila, 5 segundos procesando
+      // const waitTime = status === 'waiting' ? 15000 : 5000;
+      // await new Promise(r => setTimeout(r, waitTime));
+    // }
+  // };
 
   // --- SUBIDA DE ARCHIVO ---
   const onChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -109,7 +162,7 @@ export const AudioInputProcessor = ({ onPlayStateChange, currentNote, confidence
       const formData = new FormData();
       formData.append('api_token', API_KEY);
       formData.append('model', '1'); // Modelo Demucs (Más rápido)
-      
+
       const renamedFile = new File([file], `${Date.now()}-${file.name}`, { type: file.type });
       formData.append('audiofile', renamedFile);
 
@@ -135,17 +188,41 @@ export const AudioInputProcessor = ({ onPlayStateChange, currentNote, confidence
   };
 
   // --- DESCARGA ---
-  const downloadFiles = async (files: { [key: string]: string }) => {
-    const localStems: { [key: string]: string } = {};
-    setStatusMessage("Descargando resultados...");
-    
-    for (const [name, fileUrl] of Object.entries(files)) {
-      const fileResp = await fetch(fileUrl);
-      const blob = await fileResp.blob();
-      localStems[name] = URL.createObjectURL(blob);
-    }
-    return localStems;
+ const downloadFiles = async (files: any) => {
+  setStatusMessage("Descargando pistas...");
+  const localStems: { [key: string]: string } = {};
+// Diccionario para traducir los números de MVSep (HTDemucs)
+  const trackNames: { [key: string]: string } = {
+    "0": "drums",
+    "1": "bass",
+    "2": "other",
+    "3": "vocals",
+    "4": "instrumental"
   };
+ // Importante: usamos [id, value] para que 'id' sea el número (0, 1, 2...)
+  for (const [id, value] of Object.entries(files)) {
+    try {
+      const fileUrl = typeof value === 'string' ? value : (value as any).url;
+      if (!fileUrl) continue;
+
+      const proxiedUrl = fileUrl.startsWith('http') 
+        ? fileUrl.replace('https://mvsep.com', API_BASE)
+        : `${API_BASE}${fileUrl.startsWith('/') ? '' : '/'}${fileUrl}`;
+
+      const resp = await fetch(proxiedUrl);
+      const blob = await resp.blob();
+      
+      // Aquí usamos 'id' que es lo que viene de la API
+      const displayName = trackNames[id] || `track_${id}`;
+      localStems[displayName] = URL.createObjectURL(blob);
+      
+      console.log(`Asignado: ${id} -> ${displayName}`);
+    } catch (err) {
+      console.error("Error en descarga:", err);
+    }
+  }
+  return localStems;
+};
 
   // --- CONTROLES DE AUDIO ---
   const toggleSensor = async () => {
@@ -169,7 +246,7 @@ export const AudioInputProcessor = ({ onPlayStateChange, currentNote, confidence
     }
 
     const audios = Object.entries(audioRefs.current).filter(([_, a]) => a !== null);
-    
+
     try {
       for (const [name, audioEl] of audios) {
         if (!audioEl) continue;
@@ -191,13 +268,6 @@ export const AudioInputProcessor = ({ onPlayStateChange, currentNote, confidence
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-xl mx-auto p-4 bg-[#0b0e14] rounded-[3rem] border border-white/5 shadow-2xl">
-      <div className="bg-black/40 rounded-[2rem] p-8 border border-white/5 flex flex-col items-center">
-        <span className="text-[10px] text-cyan-400 font-mono tracking-[0.2em] mb-2 uppercase">Monitor</span>
-        <div className="text-6xl font-black text-white">{currentNote || '--'}</div>
-        <div className="w-full bg-white/5 h-1 mt-4 rounded-full overflow-hidden">
-          <div className="h-full bg-cyan-500 transition-all duration-300" style={{ width: `${confidence || 0}%` }} />
-        </div>
-      </div>
 
       <div className="w-full">
         {statusMessage ? (
@@ -212,6 +282,7 @@ export const AudioInputProcessor = ({ onPlayStateChange, currentNote, confidence
         ) : (
           <Mixer 
             stems={stems} 
+            onSelectTrack={(trackName) => console.log("Track seleccionado:", trackName)}
             volumes={volumes} 
             onChange={(t, v) => {
               setVolumes(prev => ({ ...prev, [t]: v }));
@@ -233,4 +304,3 @@ export const AudioInputProcessor = ({ onPlayStateChange, currentNote, confidence
     </div>
   );
 };
-

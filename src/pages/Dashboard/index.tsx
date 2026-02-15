@@ -10,6 +10,8 @@ export const Dashboard = () => {
   const [chordType, setChordType] = useState(""); 
   const [stems, setStems] = useState<any>(null);
   const [volumes, setVolumes] = useState<any>({});
+  const [activeNote, setActiveNote] = useState<string | null>(null);
+  const [detectedNote, setDetectedNote] = useState<string | null>(null);
 
   const handleMixerChange = (track: string, value: number) => {
     setVolumes(prev => ({ ...prev, [track]: value }));
@@ -75,13 +77,8 @@ export const Dashboard = () => {
             <h2 className="text-[10px] font-black tracking-widest text-slate-500 uppercase">Input Engine</h2>
           </div>
           <AudioInputProcessor 
-            onChordDetected={(data) => {
-              // Forzamos que la nota siempre sea mayúscula y limpia
-              const clean = data.note.replace(/[0-9]/g, '').trim();
-              if (clean !== "---") {
-                setCurrentData({ ...data, note: clean });
-              }
-            }}
+            stems={stems} 
+            onNoteDetected={setDetectedNote}
             onPlayStateChange={setIsPlaying}
           />
         </section>
@@ -99,45 +96,28 @@ export const Dashboard = () => {
               </div>
             </div>
 
-              {/* EL MÁSTIL HORIZONTAL */}
-              <div className="w-full bg-black/40 rounded-[2rem] border border-white/5 backdrop-blur-md">
-                {chordToRender ? (
-                <GuitarFretboard note={currentData.note} type={chordType} />
-                ) : (
-              <div className="h-64 flex items-center justify-center text-slate-600 italic tracking-widest text-xs uppercase">
-            {isPlaying ? "Analyzing Spectrum..." : "Engine Offline"}
-              </div>
-            )}
-              </div>
-
-              </div>
-              </section>
-                {/* SELECTOR DE TIPO */}
-                <div className="flex flex-wrap gap-2 mb-6 justify-center">
-                {chordTypes.map((t) => (
-              <button
-            key={t}
-            onClick={() => setChordType(t)}
-          className={`px-6 py-3 rounded-full text-[10px] font-black transition-all border ${
-        chordType === t 
-        ? 'bg-cyan-500 text-black border-cyan-400 shadow-lg' 
-          : 'bg-white/5 text-slate-500 border-transparent hover:bg-white/10'
-          }`}
-              >
-            {t === "" ? "MAJOR" : t.toUpperCase()}
-            </button>
-                ))}
+            {/* EL MÁSTIL HORIZONTAL */}
+            <div className="w-full bg-black/40 rounded-[2rem] border border-white/5 backdrop-blur-md">
+              {chordToRender ? (
+                <GuitarFretboard 
+                  activeNote={detectedNote} 
+                  note={selectedChordNote} 
+                  type={selectedChordType}
+                  highlightColor={TRACK_THEME[selectedTrack || ''] || '#06b6d4'}
+                />
+              ) : (
+                <div className="h-64 flex items-center justify-center text-slate-600 italic tracking-widest text-xs uppercase">
+                  {isPlaying ? "Analyzing Spectrum..." : "Engine Offline"}
                 </div>
+              )}
+            </div>
 
-                {/* BOTÓN GUARDAR */}
-                <footer className="pb-12">
-                  <button className="group relative w-full overflow-hidden rounded-[2.5rem] py-8 active:scale-[0.98] transition-all bg-gradient-to-r from-cyan-600 to-blue-500">
-                  <span className="relative z-10 text-black font-black text-xl uppercase tracking-[0.3em]">
-                  Guardar {displayNote}{chordType}
-                  </span>
-                  </button>
-                </footer>
-                </div>
-          </div>  
-                  );
-                    };
+          </div>
+        </section>
+        {/* SELECTOR DE TIPO */}
+        <footer className="pb-12">
+        </footer>
+      </div>
+    </div>  
+  );
+};
