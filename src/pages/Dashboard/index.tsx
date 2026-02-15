@@ -11,18 +11,30 @@ export const Dashboard = () => {
   const [isPlaying, setIsPlaying] = useState(false);
 
   // --- MANEJADOR DE NOTAS ---
+// Variable global o ref para persistencia fuera del ciclo de render
+const noteHistory: string[] = [];
+
 const handleNoteDetected = (fullNote: string) => {
   if (!fullNote) return;
   
-  // 1. Limpiamos la nota: "C#4" -> "C#"
-  const root = fullNote.replace(/[0-9]/g, '').trim().toUpperCase();
-  
-  // 2. Actualizamos ambos estados
-  setActiveNote(fullNote); 
-  setDetectedRoot(root);
-  
-  // DEBUG: Si ves esto en consola, el problema NO es el análisis
-  // console.log("Dashboard recibió:", root); 
+  // Guardamos las últimas 5 detecciones
+  noteHistory.push(fullNote);
+  if (noteHistory.length > 5) noteHistory.shift();
+
+  // Contamos cuál es la nota más frecuente en el historial reciente
+  const counts = noteHistory.reduce((acc: any, val) => {
+    acc[val] = (acc[val] || 0) + 1;
+    return acc;
+  }, {});
+
+  const mostFrequentNote = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+
+  // Solo actualizamos si la nota tiene una "frecuencia de aparición" alta (ej. 3 de 5)
+  if (counts[mostFrequentNote] >= 3) {
+    const root = mostFrequentNote.replace(/[0-9]/g, '').trim().toUpperCase();
+    setActiveNote(mostFrequentNote);
+    setDetectedRoot(root);
+  }
 };
 
   return (
