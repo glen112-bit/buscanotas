@@ -47,29 +47,29 @@ const handleNoteDetected = (fullNote: string) => {
         onNoteDetected={handleNoteDetected}
       />
 
-      {/* Visualización de Instrumentos */}
-      <div className="mt-8">
-        {selectedTrack ? (
-          <>
-            {(selectedTrack === 'guitar' || selectedTrack === 'bass') ? (
-              <GuitarFretboard 
-                activeNote={activeNote}      // "C#4" para el texto
-                note={detectedRoot}          // "C#" para buscar en el JSON de acordes
-                trackName={selectedTrack}
-                type={selectedTrack === 'guitar' ? 'chord' : 'note'}
-              />
-            ) : (
-              <PianoRoll 
-                activeNote={activeNote}      // El piano usará la nota completa
-                trackName={selectedTrack} 
-              />
-            )}
-          </>
-        ) : (
+     <div className="mt-8">
+        {!selectedTrack ? (
+          /* ESTADO VACÍO */
           <div className="text-center p-20 border-2 border-dashed border-white/5 rounded-[3rem] opacity-30">
             <p className="text-slate-400 uppercase tracking-widest text-xs font-bold">
               Selecciona "SOLO" en una pista para activar el análisis visual
             </p>
+          </div>
+        ) : (selectedTrack === 'guitar' || selectedTrack === 'bass') ? (
+          /* VISTA DE GUITARRA / BAJO */
+          <GuitarFretboard 
+            activeNote={activeNote}      // "C#4"
+            note={detectedRoot}          // "C#"
+            trackName={selectedTrack}
+            type={selectedTrack === 'guitar' ? 'chord' : 'note'}
+          />
+        ) : (
+          /* VISTA DE PIANO (Para Piano, Vocals, u otros) */
+          <div className="animate-in fade-in zoom-in duration-500">
+             <PianoRoll 
+                activeNote={activeNote} 
+                trackName={selectedTrack} 
+              />
           </div>
         )}
       </div>
