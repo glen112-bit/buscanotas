@@ -11,13 +11,19 @@ export const Dashboard = () => {
   const [isPlaying, setIsPlaying] = useState(false);
 
   // --- MANEJADOR DE NOTAS ---
-  const handleNoteDetected = (fullNote: string) => {
-    setActiveNote(fullNote);
-    
-    // Limpiamos la octava para el diccionario de acordes (C#4 -> C#)
-    const root = fullNote.replace(/[0-9]/g, '');
-    setDetectedRoot(root);
-  };
+const handleNoteDetected = (fullNote: string) => {
+  if (!fullNote) return;
+  
+  // 1. Limpiamos la nota: "C#4" -> "C#"
+  const root = fullNote.replace(/[0-9]/g, '').trim().toUpperCase();
+  
+  // 2. Actualizamos ambos estados
+  setActiveNote(fullNote); 
+  setDetectedRoot(root);
+  
+  // DEBUG: Si ves esto en consola, el problema NO es el análisis
+  // console.log("Dashboard recibió:", root); 
+};
 
   return (
     <div className="min-h-screen bg-[#050505] text-white p-4 md:p-8">

@@ -3,8 +3,7 @@ export interface ChordPosition {
   fingers: number[];
 }
 
-export const GUITAR_CHORDS: Record<string, ChordPosition> = {
-  // --- NATURALES MAYORES ---
+export const GUITAR_CHORDS: { [key: string]: { frets: number[], fingers: number[] } } = {  // --- NATURALES MAYORES ---
   "C": { frets: [-1, 3, 2, 0, 1, 0], fingers: [0, 3, 2, 0, 1, 0] },
   "D": { frets: [-1, -1, 0, 2, 3, 2], fingers: [0, 0, 0, 1, 3, 2] },
   "E": { frets: [0, 2, 2, 1, 0, 0], fingers: [0, 2, 3, 1, 0, 0] },
