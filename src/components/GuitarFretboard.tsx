@@ -4,9 +4,13 @@ import { GUITAR_CHORDS } from '../constants/chords';
 interface GuitarFretboardProps {
   activeNote: string | null;
   trackName: string | null;
-  note: string | null;
-  type: string | null;
+  note?: string | null;
+  type?: string | null;
 }
+
+const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const STRINGS_MAP = ['E', 'B', 'G', 'D', 'A', 'E']; // De 1ra a 6ta
+// const GUITAR_CHORDS: any = {};
 
 export const GuitarFretboard: React.FC<GuitarFretboardProps> = ({ 
   activeNote, 
@@ -18,62 +22,54 @@ export const GuitarFretboard: React.FC<GuitarFretboardProps> = ({
 
   const totalFrets = 12;
 
-  // Función para encontrar una nota individual en todo el mástil (Modo Melodía)
-  const findSingleNoteEverywhere = (noteName: string) => {
-    const strings = ['E', 'A', 'D', 'G', 'B', 'E'];
-    const notesOrder = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  // 1. Lógica para encontrar una nota en todo el mástil
+  const findSingleNoteEverywhere = (noteName: string | null) => {
+    if (!noteName) return [-1, -1, -1, -1, -1, -1];
     const cleanNote = noteName.replace(/[0-9]/g, '').trim().toUpperCase();
-    
-    return strings.map(stringRoot => {
-      const rootIndex = notesOrder.indexOf(stringRoot);
-      for (let fret = 0; fret <= 12; fret++) {
-        if (notesOrder[(rootIndex + fret) % 12] === cleanNote) return fret;
+
+    return STRINGS_MAP.map(stringRoot => {
+      const rootIndex = NOTES.indexOf(stringRoot);
+      if (rootIndex === -1) return -1;
+      for (let fret = 0; fret <= totalFrets; fret++) {
+        if (NOTES[(rootIndex + fret) % 12] === cleanNote) return fret;
       }
       return -1;
     });
   };
 
   const chordData = useMemo(() => {
-    if (!note) return null;
+    const sourceNote = note || activeNote;
+    if (!sourceNote) return null;
 
-    // 1. Limpiamos la nota (Ej: "C#4" -> "C#")
-    const root = note.replace(/[0-9]/g, '').trim().toUpperCase();
+    const root = sourceNote.replace(/[0-9]/g, '').trim().toUpperCase();
 
-   // 2. Prioridad: Si es pista de guitarra, buscar acorde mayor
-    // Verificamos que GUITAR_CHORDS exista y tenga la llave
-    if (trackName.toLowerCase().includes('guitar')) {
-      if (GUITAR_CHORDS && GUITAR_CHORDS[root]) {
-        return GUITAR_CHORDS[root];
-      }
+    // Verificamos si existe el acorde, si no, vamos a modo melodía
+    if (trackName.toLowerCase().includes('guitar') && GUITAR_CHORDS[root]) {
+      return GUITAR_CHORDS[root];
     }
 
-    // 3. Si no es acorde o no se encuentra, mostramos la nota en todas las cuerdas
+    // Por defecto, modo melodía: muestra la nota en todas las cuerdas
     return {
       frets: findSingleNoteEverywhere(root),
       fingers: [0, 0, 0, 0, 0, 0]
     };
-  }, [note, trackName]);
+  }, [note, activeNote, trackName]);
 
   const frets = chordData ? chordData.frets : [-1, -1, -1, -1, -1, -1];
   const fingers = chordData ? chordData.fingers : [0, 0, 0, 0, 0, 0];
 
   return (
     <div className="w-full max-w-4xl mx-auto p-6 bg-[#0f1115] rounded-3xl shadow-inner mt-8 border border-white/5">
-      {/* HEADER */}
       <div className="flex justify-between items-center mb-6 px-4">
         <div className="flex flex-col gap-1">
           <h3 className="text-cyan-400 font-bold uppercase tracking-widest text-xs italic">
             Visualizer: {trackName}
           </h3>
-          <span className={`w-fit text-[9px] px-2 py-0.5 rounded-full font-black ${
-            chordData?.fingers?.some(f => f > 0) 
-              ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' 
-              : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-          }`}>
-            {chordData?.fingers?.some(f => f > 0) ? '● MODO ACORDE' : '✦ MODO MELODÍA'}
+          <span className="w-fit text-[9px] px-2 py-0.5 rounded-full font-black bg-blue-500/20 text-blue-400 border border-blue-500/30">
+            {chordData?.fingers?.some((f: number) => f > 0) ? '● MODO ACORDE' : '✦ MODO MELODÍA'}
           </span>
         </div>
-        
+
         <div className="text-right">
           <p className="text-[10px] text-slate-500 font-bold uppercase">Pitch</p>
           <p className="text-4xl font-black text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.4)]">
@@ -82,10 +78,9 @@ export const GuitarFretboard: React.FC<GuitarFretboardProps> = ({
         </div>
       </div>
 
-      {/* MÁSTIL */}
       <div className="relative h-60 bg-[#1a1c22] rounded-2xl border-2 border-[#2a2e37] overflow-hidden shadow-2xl">
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/dark-wood.png')] opacity-30" />
-        
+
         {/* TRASTES */}
         {[...Array(totalFrets + 1)].map((_, i) => (
           <div key={i} 
@@ -108,11 +103,10 @@ export const GuitarFretboard: React.FC<GuitarFretboardProps> = ({
           })}
         </div>
 
-        {/* NOTAS Y DEDOS */}
+        {/* NOTAS DETECTADAS */}
         <div className="absolute inset-0 z-30">
-          {frets.map((fret, stringIndex) => {
+          {frets.map((fret: number, stringIndex: number) => {
             if (fret === -1) return null;
-            
             const xPos = fret === 0 ? 1.5 : (fret * 100 / totalFrets) - (50 / totalFrets);
             const yPos = 12 + (stringIndex * 15.2);
 
@@ -131,7 +125,43 @@ export const GuitarFretboard: React.FC<GuitarFretboardProps> = ({
             );
           })}
         </div>
+        {/* NOTAS Y DEDOS (Círculos) */}
+        <div className="absolute inset-0 z-30">
+          {frets.map((fret: number, stringIndex: number) => {
+            // IMPORTANTE: Si fret es 0, es nota al aire. Si es > 0, es traste.
+            // Solo ocultamos si es -1
+            if (fret === -1) return null;
+
+            // 1. Calculamos posición X (Horizontal)
+            // totalFrets es 12. Si fret es 1, xPos debe ser aprox 4.1% (centro del primer traste)
+            const xPos = fret === 0 ? 1.5 : (fret * 100 / totalFrets) - (50 / totalFrets);
+
+            // 2. Calculamos posición Y (Vertical) 
+            // Tu contenedor tiene py-6 (24px arriba y abajo). 
+            // Ajustamos el multiplicador para que caiga justo sobre la cuerda.
+            const yPos = 11 + (stringIndex * 15.6); 
+
+            return (
+              <div key={`string-${stringIndex}`} 
+                className={`absolute w-8 h-8 rounded-full -translate-x-1/2 -translate-y-1/2 flex items-center justify-center transition-all duration-300
+                  ${fret === 0 
+                    ? 'border-4 border-cyan-400 bg-cyan-900/80 backdrop-blur-sm shadow-[0_0_15px_rgba(34,211,238,0.8)]' 
+                    : 'bg-white shadow-[0_4px_10px_rgba(0,0,0,0.8)] border-2 border-cyan-200'
+                  }`}
+                style={{ 
+                  left: `${xPos}%`, 
+                  top: `${yPos}%`,
+                  zIndex: 40 
+                }}>
+                <span className="text-[10px] font-black text-black">
+                  {/* Si hay número de dedo lo ponemos, si no, ponemos el nombre de la nota */}
+                  {fingers[stringIndex] !== 0 ? fingers[stringIndex] : activeNote?.replace(/[0-9]/g, '')}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
-    </div>
+    </div> 
   );
 };
