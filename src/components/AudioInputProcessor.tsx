@@ -14,17 +14,54 @@ const TRACK_COLORS: { [key: string]: string } = {
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 // --- HELPERS ---
-const applyHammingWindow = (buffer: Float32Array) => {
-  for (let i = 0; i < buffer.length; i++) {
-    buffer[i] *= 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (buffer.length - 1));
-  }
-};
-
 const frequencyToNote = (frequency: number) => {
   const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2)) + 69;
   const noteName = NOTE_NAMES[Math.round(noteNum) % 12];
   const octave = Math.floor(Math.round(noteNum) / 12) - 1;
   return `${noteName}${octave}`;
+};
+
+export const autoCorrelateReal = (buffer: Float32Array, sampleRate: number) => {
+  let rms = 0;
+  for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
+  rms = Math.sqrt(rms / buffer.length);
+  if (rms < 0.01) return -1;
+
+  let r1 = 0, r2 = buffer.length - 1;
+  const thres = 0.2;
+  for (let i = 0; i < buffer.length / 2; i++) {
+    if (Math.abs(buffer[i]) < thres) { r1 = i; break; }
+  }
+  for (let i = 1; i < buffer.length / 2; i++) {
+    if (Math.abs(buffer[buffer.length - i]) < thres) { r2 = buffer.length - i; break; }
+  }
+  const buf = buffer.slice(r1, r2);
+  if (buf.length < 2) return -1;
+
+  const c = new Array(buf.length).fill(0);
+  for (let i = 0; i < buf.length; i++) {
+    for (let j = 0; j < buf.length - i; j++) {
+      c[i] = c[i] + buf[j] * buf[j + i];
+    }
+  }
+
+  let d = 0;
+  while (c[d] > c[d + 1]) d++;
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < buf.length; i++) {
+    if (c[i] > maxval) {
+      maxval = c[i];
+      maxpos = i;
+    }
+  }
+
+  let T0 = maxpos;
+  const x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+  const a = (x1 + x3 - 2 * x2) / 2;
+  const b = (x3 - x1) / 2;
+  if (a) T0 = T0 - b / (2 * a);
+
+  return sampleRate / T0;
 };
 
 export const AudioInputProcessor = ({ onPlayStateChange, onTrackSelect, onNoteDetected }: any) => {
@@ -38,262 +75,173 @@ export const AudioInputProcessor = ({ onPlayStateChange, onTrackSelect, onNoteDe
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const lowPassRef = useRef<BiquadFilterNode | null>(null);
   const sourceNodes = useRef<{ [key: string]: MediaElementAudioSourceNode }>({});
-
-  // --- ANÁLISIS ---
-const autoCorrelateReal = (buffer: Float32Array, sampleRate: number) => {
-  // 1. Umbral de Silencio (RMS)
-  let sum = 0;
-  for (let i = 0; i < buffer.length; i++) sum += buffer[i] * buffer[i];
-  const rms = Math.sqrt(sum / buffer.length);
-  if (rms < 0.01) return -1;
-
-  // 2. Center Clipping (Crucial para eliminar armónicos débiles)
-  const size = buffer.length;
-  const cbuffer = new Float32Array(size);
-  const clipLimit = 0.15; // Un poco más agresivo para limpiar la señal
-  for (let i = 0; i < size; i++) {
-    const val = buffer[i];
-    cbuffer[i] = Math.abs(val) < clipLimit ? 0 : val;
-  }
-
-  // 3. Autocorrelación con Refinamiento
-  let bestOffset = -1;
-  let maxCorrelation = 0;
   
-  // Rango de búsqueda: C2 (65Hz) a C6 (1046Hz)
-  const minOffset = Math.floor(sampleRate / 1100); 
-  const maxOffset = Math.floor(sampleRate / 60);
+  const lastFreqRef = useRef<number>(0);
+  const requestRef = useRef<number>();
+  const stableCountRef = useRef<number>(0);
+  const lastStableNoteRef = useRef<string>("");
 
-  for (let offset = minOffset; offset < maxOffset; offset++) {
-    let correlation = 0;
-    for (let i = 0; i < size - offset; i++) {
-      correlation += cbuffer[i] * cbuffer[i + offset];
+  useEffect(() => {
+    if (analyserRef.current) {
+      analyserRef.current.fftSize = selectedTrack === 'bass' ? 4096 : 2048;
+      analyserRef.current.smoothingTimeConstant = 0.8;
     }
+  }, [selectedTrack]);
 
-    // Normalización para favorecer la frecuencia fundamental sobre armónicos
-    const normalizedCorr = correlation / (size - offset);
-    
-    if (normalizedCorr > maxCorrelation) {
-      maxCorrelation = normalizedCorr;
-      bestOffset = offset;
-    }
-  }
+const startAnalysisLoop = useCallback(() => {
+    if (!analyserRef.current || !isPlaying || !audioCtxRef.current) return;
 
-  // 4. Verificación de Confianza
-  // Si la correlación es muy baja, no es una nota musical (es ruido/percusión)
-  if (maxCorrelation < 0.005) return -1;
+    const bufferLength = analyserRef.current.fftSize;
+    const dataArray = new Float32Array(bufferLength);
+    const sampleRate = audioCtxRef.current.sampleRate;
 
-  return sampleRate / bestOffset;
-};
+    const perform = () => {
+      if (!analyserRef.current || !isPlaying) return;
 
-  const startAnalysisLoop = useCallback(() => {
-  if (!analyserRef.current || !isPlaying) return;
-  const dataArray = new Float32Array(analyserRef.current.fftSize);
+      try {
+        analyserRef.current.getFloatTimeDomainData(dataArray);
+        const freq = autoCorrelateReal(dataArray, sampleRate);
 
-  const perform = () => {
-    // Si el usuario pausó, salimos del bucle legalmente
-    if (!isPlaying || !analyserRef.current) return;
+        if (freq !== -1 && !isNaN(freq)) {
+          const currentNote = selectedTrack === 'drums' ? freq.toFixed(2) : frequencyToNote(freq);
 
-    try {
-      analyserRef.current.getFloatTimeDomainData(dataArray);
-      
-      // Solo analizamos si hay audio real en el buffer
-      const frequency = autoCorrelateReal(dataArray, audioCtxRef.current!.sampleRate);
+          // Lógica de Estabilidad: Evita que la nota salte erráticamente
+          if (currentNote === lastStableNoteRef.current) {
+            stableCountRef.current++;
+          } else {
+            stableCountRef.current = 0;
+            lastStableNoteRef.current = currentNote;
+          }
 
-      if (frequency && frequency !== -1 && !isNaN(frequency)) {
-        const output = selectedTrack === 'drums' ? frequency.toString() : frequencyToNote(frequency);
-        onNoteDetected(output);
+          // Solo notificamos si la nota se mantiene por 3 ciclos (aprox 50ms)
+          if (stableCountRef.current >= 3) {
+            onNoteDetected(currentNote);
+          }
+        } else {
+          // Si no hay frecuencia (silencio), limpiamos el contador
+          stableCountRef.current = 0;
+        }
+      } catch (err) {
+        console.error("Error en análisis:", err);
       }
-    } catch (err) {
-      console.error("Error en el ciclo de análisis:", err);
-    }
+      requestRef.current = requestAnimationFrame(perform);
+    };
 
-    // Seguir el bucle
-    requestAnimationFrame(perform);
-  };
+    requestRef.current = requestAnimationFrame(perform);
 
-  requestAnimationFrame(perform);
-}, [isPlaying, selectedTrack, onNoteDetected]);
-  // --- AUDIO LOGIC ---
-  const connectTrackToAnalyzer = (trackName: string) => {
-    if (!audioCtxRef.current || !analyserRef.current || !audioRefs.current[trackName]) return;
-    const audioEl = audioRefs.current[trackName]!;
+    // Retornamos la función de limpieza
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+  }, [isPlaying, selectedTrack, onNoteDetected]);
+
+  useEffect(() => {
+    const cleanup = startAnalysisLoop();
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [startAnalysisLoop]);
+
+
+
+
+  const connectTrackToAnalyzer = async (trackName: string) => {
+    if (!audioCtxRef.current || !analyserRef.current) return;
+    if (audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume();
+    const audioEl = audioRefs.current[trackName];
+    if (!audioEl) return;
     if (!sourceNodes.current[trackName]) {
       sourceNodes.current[trackName] = audioCtxRef.current.createMediaElementSource(audioEl);
     }
     sourceNodes.current[trackName].disconnect();
-
-    if (trackName === 'piano' || trackName === 'vocals') {
-      if (!lowPassRef.current) {
-        lowPassRef.current = audioCtxRef.current.createBiquadFilter();
-        lowPassRef.current.type = 'lowpass';
-      }
-      lowPassRef.current.frequency.value = 600;
-      sourceNodes.current[trackName].connect(lowPassRef.current);
-      lowPassRef.current.connect(analyserRef.current);
-    } else {
-      sourceNodes.current[trackName].connect(analyserRef.current);
-    }
+    sourceNodes.current[trackName].connect(analyserRef.current);
     analyserRef.current.connect(audioCtxRef.current.destination);
   };
 
- const toggleMasterPlay = async () => {
-  // Si no existe el contexto, lo creamos
-  if (!audioCtxRef.current) {
-    audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    analyserRef.current = audioCtxRef.current.createAnalyser();
-    analyserRef.current.fftSize = 2048;
-  }
+  const toggleMasterPlay = async () => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      analyserRef.current = audioCtxRef.current.createAnalyser();
+    }
+    if (isPlaying) {
+      Object.values(audioRefs.current).forEach(a => a?.pause());
+      setIsPlaying(false);
+      onPlayStateChange(false);
+    } else {
+      const trackToAnalyze = selectedTrack || Object.keys(stems || {})[0];
+      if (trackToAnalyze) {
+        await connectTrackToAnalyzer(trackToAnalyze);
+        setSelectedTrack(trackToAnalyze);
+      }
+      Object.values(audioRefs.current).forEach(a => a?.play());
+      setIsPlaying(true);
+      onPlayStateChange(true);
+    }
+  };
 
-  // ¡ESTO ES CLAVE! Forzar la reactivación si el navegador lo pausó
-  if (audioCtxRef.current.state === 'suspended') {
-    await audioCtxRef.current.resume();
-  }
+  // --- FUNCIONES DE API (Las que faltaban) ---
+  const downloadFiles = async (files: any) => {
+    setStatusMessage("Guardando pistas...");
+    const localStems: { [key: string]: string } = {};
+    const trackNames: any = { "0": "drums", "1": "bass", "2": "other", "3": "vocals", "4": "guitar", "5": "piano" };
 
-  if (isPlaying) {
-    Object.values(audioRefs.current).forEach(a => a?.pause());
-    setIsPlaying(false);
-    onPlayStateChange(false);
-  } else {
-    // Conectar y reproducir
-    const trackToAnalyze = selectedTrack || Object.keys(stems || {})[0];
-    if (trackToAnalyze) connectTrackToAnalyzer(trackToAnalyze);
-    
-    Object.values(audioRefs.current).forEach(a => a?.play());
-    setIsPlaying(true);
-    onPlayStateChange(true);
-    
-    // Forzamos el reinicio del bucle por si se quedó colgado
-    startAnalysisLoop(); 
-  }
-};
+    for (const [id, value] of Object.entries(files)) {
+      const fileUrl = typeof value === 'string' ? value : (value as any).url;
+      const resp = await fetch(fileUrl.replace('https://mvsep.com', API_BASE));
+      const blob = await resp.blob();
+      const displayName = trackNames[id] || `track_${id}`;
+      await saveToDB(displayName, blob);
+      localStems[displayName] = URL.createObjectURL(blob);
+    }
+    return localStems;
+  };
 
-  useEffect(() => {
-    if (isPlaying) startAnalysisLoop();
-  }, [isPlaying, startAnalysisLoop]);
+  const waitForMVSepTask = async (hash: string): Promise<any> => {
+    const url = `${PROXY_PREFIX}/api/separation/get?hash=${hash}&api_token=${API_KEY}`;
+    while (true) {
+      const response = await fetch(url);
+      const res = await response.json();
+      const info = res.data || res;
+      if (info.status === 'done') return await downloadFiles(info.files);
+      if (info.status === 'error') throw new Error("Error en la IA.");
+      setStatusMessage(`IA Procesando: ${info.progress || 0}%`);
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  };
 
-  // --- DB & API LOGIC ---
+  const onChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setStatusMessage("Subiendo...");
+    try {
+      const formData = new FormData();
+      formData.append('api_token', API_KEY);
+      formData.append('model', '11');
+      formData.append('audiofile', file);
+      const resp = await fetch(`${PROXY_PREFIX}/api/separation/create`, { method: 'POST', body: formData });
+      const result = await resp.json();
+      if (result.success) {
+        const secureFiles = await waitForMVSepTask(result.data.hash);
+        setStems(secureFiles);
+        setStatusMessage("");
+      }
+    } catch (error) { setStatusMessage("Error en subida"); }
+  };
+
   const handleLoadFromDB = async () => {
-    setStatusMessage("Buscando en biblioteca...");
+    setStatusMessage("Cargando...");
     try {
       const savedStems = await getAllStemsFromDB();
       if (Object.keys(savedStems).length > 0) {
         setStems(savedStems);
         setStatusMessage("");
       } else {
-        setStatusMessage("La biblioteca está vacía.");
+        setStatusMessage("Biblioteca vacía");
         setTimeout(() => setStatusMessage(""), 2000);
       }
-    } catch (e) { setStatusMessage("Error al cargar DB"); }
+    } catch (e) { setStatusMessage("Error en DB"); }
   };
-
-// --- Dentro del componente AudioInputProcessor ---
-
-const downloadFiles = async (files: any) => {
-  setStatusMessage("Guardando pistas...");
-  const localStems: { [key: string]: string } = {};
-  const trackNames: any = { "0": "drums", "1": "bass", "2": "guitar", "3": "vocals" };
-
-  for (const [id, value] of Object.entries(files)) {
-    const fileUrl = typeof value === 'string' ? value : (value as any).url;
-    // Reemplazamos el dominio para evitar problemas de CORS vía proxy
-    const resp = await fetch(fileUrl.replace('https://mvsep.com', API_BASE));
-    const blob = await resp.blob();
-    const displayName = trackNames[id] || `track_${id}`;
-    
-    // Guardamos en IndexedDB para la persistencia de la "Biblioteca"
-    await saveToDB(displayName, blob);
-    localStems[displayName] = URL.createObjectURL(blob);
-  }
-  return localStems;
-};
-
-const waitForMVSepTask = async (hash: string): Promise<any> => {
-  const url = `${PROXY_PREFIX}/api/separation/get?hash=${hash}&api_token=${API_KEY}`;
-  
-  while (true) {
-    const response = await fetch(url);
-    const res = await response.json();
-    const info = res.data || res;
-
-    if (info.status === 'done') {
-      return await downloadFiles(info.files);
-    }
-    
-    if (info.status === 'error') {
-      throw new Error("La IA encontró un problema procesando el audio.");
-    }
-
-    // Actualizamos el progreso en el UI
-    setStatusMessage(`IA Procesando: ${info.progress || 0}%`);
-    
-    // Esperamos 5 segundos antes de volver a preguntar (polling)
-    await new Promise(r => setTimeout(r, 5000));
-  }
-};
-
-const onChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-
-  setStatusMessage("Subiendo a MVSep...");
-  
-  try {
-    const formData = new FormData();
-    formData.append('api_token', API_KEY);
-    formData.append('model', '1'); // Modelo MDX23 (bueno para piano/voz)
-    formData.append('audiofile', file);
-
-    const resp = await fetch(`${PROXY_PREFIX}/api/separation/create`, { 
-      method: 'POST', 
-      body: formData 
-    });
-    
-    const result = await resp.json();
-
-    if (result.success) {
-      const secureFiles = await waitForMVSepTask(result.data.hash);
-      setStems(secureFiles);
-      
-      // Inicializar volúmenes por defecto
-      const initialVols: any = {};
-      Object.keys(secureFiles).forEach(k => initialVols[k] = 0.8);
-      setVolumes(initialVols);
-      
-      setStatusMessage("");
-    } else {
-      throw new Error(result.error || "Error al crear la tarea");
-    }
-  } catch (error: any) {
-    console.error(error);
-    setStatusMessage(`Error: ${error.message}`);
-    setTimeout(() => setStatusMessage(""), 5000);
-  }
-};
-
-
-const perform = () => {
-  if (!isPlaying || !analyserRef.current) return;
-  analyserRef.current.getFloatTimeDomainData(dataArray);
-  
-  const frequency = autoCorrelateReal(dataArray, audioCtxRef.current!.sampleRate);
-
-  if (frequency !== -1) {
-    if (selectedTrack === 'drums') {
-      // Enviamos la frecuencia numérica directamente
-      onNoteDetected(frequency.toString());
-    } else {
-      // Enviamos la nota musical (C4, A#3...)
-      const note = frequencyToNote(frequency);
-      onNoteDetected(note);
-    }
-  }
-  requestAnimationFrame(perform);
-};
-
-
 
   return (
     <div className="relative flex flex-col gap-6 w-full max-w-xl mx-auto p-4 bg-[#0b0e14] rounded-[3rem] border border-white/5 shadow-2xl">
@@ -318,7 +266,6 @@ const perform = () => {
               <button onClick={() => setSourceMode('upload')} className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${sourceMode === 'upload' ? 'bg-cyan-500 text-black' : 'text-slate-400'}`}>🚀 SUBIR</button>
               <button onClick={() => setSourceMode('library')} className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${sourceMode === 'library' ? 'bg-cyan-500 text-black' : 'text-slate-400'}`}>📂 BIBLIOTECA</button>
             </div>
-
             {sourceMode === 'upload' ? (
               <label className="flex flex-col items-center justify-center bg-white/5 border border-white/10 rounded-[2.5rem] py-16 cursor-pointer hover:bg-white/10 border-dashed group transition-all">
                 <input type="file" className="hidden" onChange={onChange} accept="audio/*" />
@@ -334,8 +281,8 @@ const perform = () => {
           </div>
         ) : (
           <Mixer 
-            stems={stems} volumes={volumes} audioRefs={audioRefs}
-            selectedTrack={selectedTrack} onSelectTrack={(name) => { setSelectedTrack(name); if(isPlaying) connectTrackToAnalyzer(name); onTrackSelect(name); }}
+            stems={stems} volumes={volumes} audioRefs={audioRefs} selectedTrack={selectedTrack} 
+            onSelectTrack={(name) => { setSelectedTrack(name); onTrackSelect(name); if (isPlaying) connectTrackToAnalyzer(name); }}
             onChange={(t, v) => setVolumes(prev => ({ ...prev, [t]: v }))}
             colors={TRACK_COLORS} audioContext={audioCtxRef.current}
           />
@@ -351,4 +298,4 @@ const perform = () => {
       )}
     </div>
   );
-};;
+};
